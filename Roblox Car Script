@@ -8,7 +8,7 @@ local doorLockE = carEventsF.DoorLock
 local seat = script.Parent
 local model = seat.Parent.Parent
 
-
+--change part material and enable car light
 local lightOn = false
 local lights = model.Front.Light
 lightE.OnServerEvent:Connect(function(player)
@@ -30,6 +30,7 @@ lightE.OnServerEvent:Connect(function(player)
 	end
 end)
 
+-- set all the doors in you car cancollide to true so no one can pass through
 local doorLock = false
 local doors = model.Door:GetChildren()
 doorLockE.OnServerEvent:Connect(function(player)
@@ -48,6 +49,7 @@ doorLockE.OnServerEvent:Connect(function(player)
 	end
 end)
 
+-- fling the chair (using velocity) upward and remove the roof so the chair doesnt get stuck use this to remove player that you dont want in your car
 local ejectE = carEventsF.Chair
 local roofs = model.Roof:GetChildren()
 local seats = model.Seats:GetChildren()
@@ -77,6 +79,7 @@ ejectE.OnServerEvent:Connect(function(player,seatNumber)
 	end
 end)
 
+-- tween trunk part using motor 6D so it still work even the car is moving
 local trunkE = carEventsF.Trunk
 local trunk = model.Back.Trunk
 local weld = trunk.Motor6D
@@ -101,6 +104,7 @@ trunkE.OnServerEvent:Connect(function(player)
 	end
 end)
 
+--just play horn sound
 local hornClick = model.functional.SteeringWheel.Horn.ClickDetector
 local hornSound = model.Front.SoundFront.Horn
 hornClick.MouseClick:Connect(function()
@@ -109,8 +113,7 @@ end)
 
 
 
-
-
+-- get the id that user input check if it a valid song and play it use the other button to navigate through the song
 local radio = model.functional.Radio
 local leftRadio = radio.left.ClickDetector
 local rightRadio = radio.right.ClickDetector
@@ -184,9 +187,18 @@ rightRadio.MouseClick:Connect(function()
 end)
 
 
-
+--destroy all the car weld so it fall appart and destroy the model few second after
+function carDestroy ()
+	local descendants = model:GetDescendants()
+	for _,v in pairs(descendants) do
+		if v:IsA("WeldConstraint") or v:IsA("Weld") then
+			v:Destroy()
+		end
+	end
+	task.wait(10)
+	model:Destroy()
+end
 local breakE = carEventsF.Break
-
 breakE.OnServerEvent:Connect(function(player)
 	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
 		carDestroy()
@@ -194,6 +206,7 @@ breakE.OnServerEvent:Connect(function(player)
 end)
 
 
+--flip the car using align orientation but first check to see if there an object between player and button so it force player to get outside the car to flip it
 local flipButton = model.functional.FlipButton
 local raycastP = RaycastParams.new()
 raycastP.FilterType = Enum.RaycastFilterType.Exclude
@@ -211,7 +224,7 @@ flipButton.ClickDetector.MouseClick:Connect(function(player)
 end)
 
 
-
+-- using motor6d to steer and hinge constrain to go 
 local wheels = model.Wheels
 local LSteer =  wheels.Front.Left.SLeft.Servo
 local RSteer = wheels.Front.Right.SRight.Servo
@@ -250,17 +263,7 @@ local fuelLeft = 100
 local fuelLabel = model.functional.GUI.SurfaceGui.Frame.TextLabel
 fuelLabel.Text = fuelLeft
 
-function carDestroy ()
-	local descendants = model:GetDescendants()
-	for _,v in pairs(descendants) do
-		if v:IsA("WeldConstraint") or v:IsA("Weld") then
-			v:Destroy()
-		end
-	end
-	task.wait(10)
-	model:Destroy()
-end
-
+--caculate the fuel using i if the fuel ran out car break
 local caculateFuel = (function ()
 	if boosting and fuelLeft > 0 then
 		while boosting do
@@ -274,6 +277,7 @@ local caculateFuel = (function ()
 		end
 	end
 end)
+--boost the car 2x by 2x motormax torque acceleration and max speed
 boostE.OnServerEvent:Connect(function(player)
 	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
 		if boosting == false and fuelLeft > 0 then
