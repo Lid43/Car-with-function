@@ -1,130 +1,336 @@
---Scripter: binoobpropro
+--module script
+local module = {}
+module.__index = module
+module.new = function(carT)
+	local thisCar = setmetatable({}, module)
+	for k,v in pairs(carT) do
+		thisCar[k] = v
+	end
+	return thisCar
+end
 
+local ps = game:GetService("Players")
+local tween = game:GetService("TweenService")
 local rs = game:GetService("ReplicatedStorage")
-local carEventsF = rs.Events.ClientToServer.Car
-local lightE = carEventsF.Light
-local doorLockE = carEventsF.DoorLock
+local killE = rs.Events.Server.LeaderBoard.KillEvent
+local coinE = rs.Events.Server.LeaderBoard.CoinEvent
 
-local seat = script.Parent
-local model = seat.Parent.Parent
-
---change part material and enable car light
-local lightOn = false
-local lights = model.Front.Light
-lightE.OnServerEvent:Connect(function(player)
-	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
-		if lightOn == false  then
-			lights.Right.Material = Enum.Material.Neon
-			lights.Left.Material = Enum.Material.Neon
-			lights.Left.SpotLight.Enabled = true
-			lights.Right.SpotLight.Enabled = true
-			lightOn = true
-		elseif lightOn == true then
-			lights.Right.Material = Enum.Material.Plastic
-			lights.Left.Material = Enum.Material.Plastic
-			lights.Left.SpotLight.Enabled = false
-			lights.Right.SpotLight.Enabled = false
-			lightOn = false
-		end
-
-	end
-end)
-
--- set all the doors in you car cancollide to true so no one can pass through
-local doorLock = false
-local doors = model.Door:GetChildren()
-doorLockE.OnServerEvent:Connect(function(player)
-	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
-		if doorLock == false then
-			for _,v in pairs(doors) do
-				v.CanCollide = true
+function module.carDestroy (model)
+	coroutine.wrap(function(modelR)
+		local descendants = modelR:GetDescendants()
+		for _,v in pairs(descendants) do
+			if v:IsA("WeldConstraint") or v:IsA("Weld") then
+				v:Destroy()
 			end
-			doorLock = true
-		elseif doorLock == true	 then
-			for _,v in pairs(doors) do
-				v.CanCollide = false
-			end
-			doorLock = false
 		end
-	end
-end)
+		modelR.PrimaryPart.BreakSound:Play()
+		task.wait(10)
+		modelR:Destroy()	
+	end)(model)
+end
+ 
 
--- fling the chair (using velocity) upward and remove the roof so the chair doesnt get stuck use this to remove player that you dont want in your car
-local ejectE = carEventsF.Chair
-local roofs = model.Roof:GetChildren()
-local seats = model.Seats:GetChildren()
-local springSound = model.Main.SpringSound
-ejectE.OnServerEvent:Connect(function(player,seatNumber)
-	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
-		for _,v:Seat in pairs(seats) do
-			if v.Name == "Seat"..seatNumber then
-				for __, weld in pairs(v:GetChildren()) do
+
+function module:doorLockF ()
+	local doors = self.model.Door:GetChildren()
+	if self.doorLock == false then
+		for _,v in pairs(doors) do
+			v.CanCollide = true
+		end
+		self.doorLock = true
+	elseif self.doorLock == true	 then
+		for _,v in pairs(doors) do
+			v.CanCollide = false
+		end
+		self.doorLock = false
+	end
+end
+
+function module:eject(seatNumber)
+	if self.ejectDebounce == false then
+		self.ejectDebounce = true
+		local roofs = self.model.Roof:GetChildren()
+		local seats = self.model.Seats
+		local main = self.model.PrimaryPart
+		local springSound = main.SpringSound
+		local seat = seats:FindFirstChild("Seat"..seatNumber)
+		if seat then
+			for __, weld in pairs(seat:GetChildren()) do
+				if weld:IsA("WeldConstraint") and weld.Name ~= "SeatWeld" then
 					weld:Destroy()
 				end
-				for __, roof in pairs(roofs) do
-					roof.CanCollide = false
-					roof.Transparency = 1
-				end
-				v.AssemblyLinearVelocity = Vector3.new(0,2000,0)+model.Main.Velocity
-				springSound:Play()
-				task.wait(1)
-				carDestroy()
-				task.wait(4)
-				for __, roof in pairs(roofs) do
-					roof.CanCollide = true
-					roof.Transparency = 0
-				end
+			end
+			for __, roof in pairs(roofs) do
+				roof.CanCollide = false
+				roof.Transparency = 1
+			end
+			task.wait()
+			local Vforce = Instance.new("VectorForce")
+			Vforce.Parent = seat 
+			Vforce.Attachment0 = seat.Attachment
+			Vforce.Force = Vector3.new(0,5000,0)
+			springSound:Play()
+			task.wait(1)
+			Vforce:Destroy()
+			task.wait(2)
+			for __, roof in pairs(roofs) do
+				roof.CanCollide = true
+				roof.Transparency = 0
+			end
+			if seatNumber == 0  then
+				module.carDestroy(self.model)
+			else
+				seat:Destroy()
 			end
 		end
+		self.ejectDebounce = false
 	end
-end)
+end
 
--- tween trunk part using motor 6D so it still work even the car is moving
-local trunkE = carEventsF.Trunk
-local trunk = model.Back.Trunk
-local weld = trunk.Motor6D
 
-local tween = game:GetService("TweenService")
-local openTrunk = false
 local tCFrame = CFrame.new(1, -0.75, 0)
 local oCFrame = CFrame.new(-2, -0.75, 0)
-trunkE.OnServerEvent:Connect(function(player)
-	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then	
-		local connection 
-		local info = TweenInfo.new(1, Enum.EasingStyle.Linear,Enum.EasingDirection.In,0,false,0)
-		if openTrunk then
-			tween:Create(weld,info,{C0 = oCFrame}):Play()
-			task.wait(1)
-			openTrunk = false
-		else	
-			tween:Create(weld,info,{C0 = tCFrame}):Play()
-			task.wait(1)
-			openTrunk = true
+local info = TweenInfo.new(1, Enum.EasingStyle.Linear,Enum.EasingDirection.In,0,false,0)
+function module:trunk ()
+	local weld = self.model.Back.Trunk.Motor6D
+	if self.openTrunk then
+		tween:Create(weld,info,{C0 = oCFrame}):Play()
+		task.wait(1)
+		self.openTrunk = false
+	else	
+		tween:Create(weld,info,{C0 = tCFrame}):Play()
+		task.wait(1)
+		self.openTrunk = true
+	end
+end
+
+
+function module:flip(flipButton)
+	if self.flipDebounce == false then
+		self.flipDebounce = true
+		flipButton.BrickColor = BrickColor.new("Really red")
+		flipButton.AlignOrientation.Enabled = true
+		task.wait(1)
+		flipButton.AlignOrientation.Enabled = false
+		flipButton.BrickColor = BrickColor.new("Lime green")
+		self.flipDebounce =false
+	end
+end
+
+local function getVehicle(part)
+	local object = part
+	while true do
+		local model = object:FindFirstAncestorWhichIsA("Model")
+		if model and model.Parent.Parent == game.Workspace.Vehicles then
+			return model
+		elseif model then
+			object = model
+		elseif model == nil then
+			return nil
 		end
+	end
+end
+
+
+function module:hit(touchedPart)
+	local main
+	local velocity
+	local humanoid
+	local success, errorM = pcall(function()
+		main = self.model.PrimaryPart
+		velocity = main.AssemblyLinearVelocity.Magnitude
+		local char = touchedPart:FindFirstAncestorWhichIsA("Model")
+		humanoid = char:FindFirstChildWhichIsA("Humanoid") 
+	end)
+	if success then
+		if not table.find(self.damageTable,humanoid) and humanoid and main.Parent:GetAttribute("Owner") ~= touchedPart:FindFirstAncestorWhichIsA("Model").Name and velocity>10 and  humanoid.Health > 0 then
+			table.insert(self.damageTable,humanoid)
+			humanoid:TakeDamage(velocity)
+			if humanoid.Health <= 0 and self.seat.Occupant then
+				local player =  game:GetService("Players"):GetPlayerFromCharacter(self.seat.Occupant.Parent) 
+				if player and touchedPart:FindFirstAncestorWhichIsA("Model"):HasTag ("NPC") then
+					coinE:Fire(player,touchedPart:FindFirstAncestorWhichIsA("Model"):GetAttribute("Coins"),true)
+				elseif player and not touchedPart:FindFirstAncestorWhichIsA("Model"):HasTag ("NPC") then
+					killE:Fire(player)
+					task.wait(5)
+				end 
+			end
+			task.wait(3)
+			table.remove(self.damageTable,table.find(self.damageTable,humanoid))
+		elseif touchedPart:IsA("BasePart") and touchedPart:IsDescendantOf(workspace.Vehicles.Car) and velocity >100 and self.explode == false and touchedPart:IsDescendantOf(main.Parent) == false then
+			self.explode = true
+			local explosion = Instance.new("Explosion")
+			explosion.BlastRadius = 20
+			explosion.BlastPressure = 5000*130
+			explosion.Position = touchedPart.Position
+			explosion.DestroyJointRadiusPercent = 0
+			module.carDestroy(getVehicle(touchedPart))	
+			task.wait(0.2)
+			explosion.Parent = touchedPart
+			main.ExplosionSound:Play()
+			task.wait(2)
+			self.explode = false
+		end
+	end
+end
+
+
+function module:steer (steerFloat)
+	local rotation = -(self.maxSteer * steerFloat)
+	self.SWHInge.TargetAngle = math.deg(rotation)*3
+	self.LSteer.DesiredAngle = rotation
+	self.RSteer.DesiredAngle = rotation
+end
+
+
+function module:movement(throttleFloat)
+	local movement = throttleFloat * self.maxSpeed
+	self.FLMotor.AngularVelocity = movement
+	self.FRMotor.AngularVelocity = -movement
+	self.BLMotor.AngularVelocity = movement
+	self.BRMotor.AngularVelocity = -movement
+end
+
+ 
+
+function caculateFuel (self)
+	local model = self.model
+	local label = self.fuelLabel
+	if self.boosting and self.fuelLeft > 0 then
+		while self.boosting do
+			if self.fuelLeft <=0 then
+				module.carDestroy(model)
+				break
+			end
+			self.fuelLeft = self.fuelLeft -1
+			label.Text = self.fuelLeft
+			task.wait(1)
+		end
+	end
+end
+
+
+function module:boost ()
+	local maxT = self.maxT
+	local maxA = self.maxA
+	if self.boosting == false and self.fuelLeft > 0 then
+		self.boosting = true
+		self.trail.Enabled = true
+		self.maxSpeed = 240
+		self.FLMotor.MotorMaxTorque = maxT*2
+		self.FRMotor.MotorMaxTorque = maxT*2
+		self.BLMotor.MotorMaxTorque = maxT*2
+		self.BRMotor.MotorMaxTorque = maxT*2
+
+		self.FLMotor.MotorMaxAcceleration = maxA*2
+		self.FRMotor.MotorMaxAcceleration = maxA*2
+		self.BLMotor.MotorMaxAcceleration = maxA*2
+		self.BRMotor.MotorMaxAcceleration = maxA*2
+		module.movement(self,self.seat.ThrottleFloat)
+		module.steer(self,self.seat.SteerFloat)
+		caculateFuel(self)
+	else 
+		self.boosting = false
+		self.trail.Enabled = false
+		self.maxSpeed = 60
+		self.FLMotor.MotorMaxTorque = maxT
+		self.FRMotor.MotorMaxTorque = maxT
+		self.BLMotor.MotorMaxTorque = maxT
+		self.BRMotor.MotorMaxTorque = maxT
+
+		self.FLMotor.MotorMaxAcceleration = maxA
+		self.FRMotor.MotorMaxAcceleration = maxA
+		self.BLMotor.MotorMaxAcceleration = maxA
+		self.BRMotor.MotorMaxAcceleration = maxA
+		module.movement(self,self.seat.ThrottleFloat)
+		module.steer(self,self.seat.SteerFloat)
+	end
+
+end
+
+return module
+
+
+
+
+
+
+
+
+
+-- car script
+local runS = game:GetService("RunService")
+local rs = game:GetService("ReplicatedStorage")
+local carEventsF = rs.Events.ClientAndServer.Car
+local doorLockE = carEventsF.DoorLock
+local ejectE = carEventsF.Chair
+local model = script.Parent.Parent.Parent
+local main = model.Main
+
+
+local seat = script.Parent
+local wheels = model.Wheels
+local carT = {
+	["model"] = model,
+	["seat"] = seat,
+	["maxSteer"] = math.rad(18),
+	["maxA"] = 500000,
+	["maxT"] = 10000,
+	["fuelLeft"] = 100,
+	["maxSpeed"] = 60,
+	["trail"] = model.Back.TrailPart.Trail,
+	["doorLock"] = false,
+	["openTrunk"] = false,
+	["flipDebounce"] = false,
+	["explode"] = false,
+	["LSteer"] =  wheels.Front.Left.SLeft.Servo,
+	["RSteer"] = wheels.Front.Right.SRight.Servo,
+	["SWHInge"] = model.functional.SteeringWheel.HingeConstraint,
+	["FLMotor"] = wheels.Front.Left.Left.HingeConstraint,
+	["FRMotor"] = wheels.Front.Right.Right.HingeConstraint,
+	["BLMotor"] = wheels.Back.Left.Left.HingeConstraint,
+	["BRMotor"] = wheels.Back.Right.Right.HingeConstraint,
+	["boosting"] = false,
+	["ejectDebounce"] = false,
+	["fuelLabel"] = model.functional.GUI.SurfaceGui.Frame.TextLabel,
+	["damageTable"] = {}
+}
+
+local moduleScript = require(rs.Cars.functions)
+local metaTable = moduleScript.new(carT)
+
+
+doorLockE.OnServerEvent:Connect(function(playerR)
+	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == playerR then
+		metaTable:doorLockF()
 	end
 end)
 
---just play horn sound
+ejectE.OnServerEvent:Connect(function(playerR,seatNumber)
+	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == playerR then
+		metaTable:eject(seatNumber)
+	end
+end)
+
+local trunkE = carEventsF.Trunk
+trunkE.OnServerEvent:Connect(function(player)
+	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then	
+		metaTable:trunk()
+	end
+end)
+
 local hornClick = model.functional.SteeringWheel.Horn.ClickDetector
 local hornSound = model.Front.SoundFront.Horn
 hornClick.MouseClick:Connect(function()
 	hornSound:Play()
 end)
 
-
-
--- get the id that user input check if it a valid song and play it use the other button to navigate through the song
-local radio = model.functional.Radio
-local leftRadio = radio.left.ClickDetector
-local rightRadio = radio.right.ClickDetector
-local buttonRadio = radio.button.ClickDetector
-local studRadio = radio.stud.ClickDetector
-local GUIRadio = radio.stud.SurfaceGui
-local  ms = game:GetService("MarketplaceService")
-local soundTable = {}
 local radioE = carEventsF.Radio
+local radio = model.functional.Radio
+local GUIRadio = radio.stud.SurfaceGui
 local indexLabel = radio.button.SurfaceGui.Frame.TextLabel
-
+local soundTable = {}
+local  ms = game:GetService("MarketplaceService")
 local function ValidateSong(songID) 
 	if not songID or not tonumber(songID) then return false end
 	local success, result = pcall(function()
@@ -137,24 +343,30 @@ local function ValidateSong(songID)
 		return false
 	end
 end
-
-studRadio.MouseClick:Connect(function()
-	GUIRadio.Enabled = true
-	GUIRadio.Active = true
-end)
-radioE.OnServerEvent:Connect(function(player,soundID)
+function addSong(soundID)
 	GUIRadio.Enabled = false
 	GUIRadio.Active = false
 	local result = ValidateSong(soundID)
 	if result  then
 		local sound = Instance.new("Sound")
-		sound.Parent = studRadio.Parent
+		sound.Parent = radio.stud
 		sound.SoundId = "rbxassetid://"..soundID
-		table.insert(soundTable,sound)
+		return sound
+	end
+	return nil
+end
+radio.stud.ClickDetector.MouseClick:Connect(function()
+	GUIRadio.Enabled = true
+	GUIRadio.Active = true
+end)
+radioE.OnServerEvent:Connect(function(player,soundID)
+	local result = addSong()
+	if result then
+		table.insert(soundTable,result)
 	end
 end)
 local soundIndex = 1
-buttonRadio.MouseClick:Connect(function()
+radio.button.ClickDetector.MouseClick:Connect(function()
 	if #soundTable ~= 0 then
 		local sound = soundTable[soundIndex]
 		if sound.Playing then
@@ -165,7 +377,7 @@ buttonRadio.MouseClick:Connect(function()
 		indexLabel.Text = soundIndex
 	end
 end)
-leftRadio.MouseClick:Connect(function()
+radio.left.ClickDetector.MouseClick:Connect(function()
 	if #soundTable ~= 0  then
 		if soundIndex == 1 then
 			soundIndex = #soundTable
@@ -175,7 +387,7 @@ leftRadio.MouseClick:Connect(function()
 		indexLabel.Text = soundIndex
 	end
 end)
-rightRadio.MouseClick:Connect(function()
+radio.right.ClickDetector.MouseClick:Connect(function()
 	if #soundTable ~= 0  then
 		if soundIndex == #soundTable then
 			soundIndex =  1
@@ -186,129 +398,54 @@ rightRadio.MouseClick:Connect(function()
 	end
 end)
 
-
---destroy all the car weld so it fall appart and destroy the model few second after
-function carDestroy ()
-	local descendants = model:GetDescendants()
-	for _,v in pairs(descendants) do
-		if v:IsA("WeldConstraint") or v:IsA("Weld") then
-			v:Destroy()
-		end
-	end
-	task.wait(10)
-	model:Destroy()
-end
 local breakE = carEventsF.Break
 breakE.OnServerEvent:Connect(function(player)
 	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
-		carDestroy()
+		metaTable.carDestroy(model)
 	end	
 end)
 
-
---flip the car using align orientation but first check to see if there an object between player and button so it force player to get outside the car to flip it
 local flipButton = model.functional.FlipButton
-local raycastP = RaycastParams.new()
-raycastP.FilterType = Enum.RaycastFilterType.Exclude
-flipButton.ClickDetector.MouseClick:Connect(function(player)
-	local character =player.Character
-	raycastP.FilterDescendantsInstances = {character,flipButton}
-	local rayOrigin = character.PrimaryPart.Position
-	local rayDirection  = flipButton.Position -rayOrigin
-	local result = 	workspace:Raycast(rayOrigin,rayDirection,raycastP)
-	if result == nil then
-		flipButton.AlignOrientation.Enabled = true
-		wait(1)
-		flipButton.AlignOrientation.Enabled = false
+flipButton.ClickDetector.MouseClick:Connect(function()
+	metaTable:flip(flipButton)
+end)
+
+local fronthitbox = model.functional.Hitbox
+local backHitBox = model.functional.BackHitBox
+fronthitbox.Touched:Connect(function(touchedPart)
+	metaTable:hit(touchedPart)
+end)
+backHitBox.Touched:Connect(function(touchedPart)
+	metaTable:hit(touchedPart)
+end)
+
+local engineSound = main.EngineSound
+runS.Heartbeat:Connect(function()
+	if seat.Occupant then
+		local speed = main.AssemblyLinearVelocity.Magnitude
+		engineSound.PlaybackSpeed = 0.1 + speed/150
+	end
+end)
+seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+	if seat.Occupant then
+		engineSound:Play()
+	else
+		engineSound:Stop()
 	end
 end)
 
 
--- using motor6d to steer and hinge constrain to go 
-local wheels = model.Wheels
-local LSteer =  wheels.Front.Left.SLeft.Servo
-local RSteer = wheels.Front.Right.SRight.Servo
 
-local FLMotor = wheels.Front.Left.Left.HingeConstraint
-local FRMotor = wheels.Front.Right.Right.HingeConstraint
-local BLMotor = wheels.Back.Left.Left.HingeConstraint
-local BRMotor = wheels.Back.Right.Right.HingeConstraint
-
-local maxSpeed = 60
-local maxSteer = math.rad(15)
-local SWHInge = model.functional.SteeringWheel.HingeConstraint
 seat:GetPropertyChangedSignal("SteerFloat"):Connect(function()
-	local rotation = -(maxSteer * seat.SteerFloat)
-	SWHInge.TargetAngle = math.deg(rotation)*3
-	LSteer.DesiredAngle = rotation
-	RSteer.DesiredAngle = rotation
+	metaTable:steer(seat.SteerFloat)
 end)
-function movement()
-	local movement = maxSpeed* seat.ThrottleFloat
-	FLMotor.AngularVelocity = movement
-	FRMotor.AngularVelocity = -movement
-	BLMotor.AngularVelocity = movement
-	BRMotor.AngularVelocity = -movement
-end
 seat:GetPropertyChangedSignal("ThrottleFloat"):Connect(function()
-	movement()
+	metaTable:movement(seat.ThrottleFloat)
 end)
 
-local maxA = 500000
-local maxT = 10000
-local boostE = carEventsF.Boost
-local trail = model.Back.TrailPart.Trail
-local boosting = false
-local fuelLeft = 100
-local fuelLabel = model.functional.GUI.SurfaceGui.Frame.TextLabel
-fuelLabel.Text = fuelLeft
-
---caculate the fuel using i if the fuel ran out car break
-local caculateFuel = (function ()
-	if boosting and fuelLeft > 0 then
-		while boosting do
-			if fuelLeft <=0 then
-				carDestroy()
-				break
-			end
-			fuelLeft = fuelLeft -1
-			fuelLabel.Text = fuelLeft
-			task.wait(1)
-		end
-	end
-end)
---boost the car 2x by 2x motormax torque acceleration and max speed
+boostE = carEventsF.Boost
 boostE.OnServerEvent:Connect(function(player)
 	if seat.Occupant ~= nil and game:GetService("Players"):GetPlayerFromCharacter(seat.Occupant.Parent) == player then
-		if boosting == false and fuelLeft > 0 then
-			boosting = true
-			trail.Enabled = true
-			maxSpeed = 120
-			FLMotor.MotorMaxTorque = maxT*2
-			FRMotor.MotorMaxTorque = maxT*2
-			BLMotor.MotorMaxTorque = maxT*2
-			BRMotor.MotorMaxTorque = maxT*2
-
-			FLMotor.MotorMaxAcceleration = maxA*2
-			FRMotor.MotorMaxAcceleration = maxA*2
-			BLMotor.MotorMaxAcceleration = maxA*2
-			BRMotor.MotorMaxAcceleration = maxA*2
-			caculateFuel()
-		else 
-			boosting = false
-			trail.Enabled = false
-			maxSpeed = 60
-			FLMotor.MotorMaxTorque = maxT
-			FRMotor.MotorMaxTorque = maxT
-			BLMotor.MotorMaxTorque = maxT
-			BRMotor.MotorMaxTorque = maxT
-			
-			FLMotor.MotorMaxAcceleration = maxA
-			FRMotor.MotorMaxAcceleration = maxA
-			BLMotor.MotorMaxAcceleration = maxA
-			BRMotor.MotorMaxAcceleration = maxA
-		end
-		movement()
+		metaTable:boost()
 	end
 end)
-
