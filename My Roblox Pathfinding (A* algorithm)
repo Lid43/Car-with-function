@@ -224,6 +224,9 @@ function module:FollowPathTo (endPosR)
 			previousPos = v
 		end
 		runTrack:Stop()
+		for i,v in pairs(self.tempFolder:GetChildren()) do
+			v:Destroy()
+		end
 	end
 end
 return module
