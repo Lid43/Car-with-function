@@ -1,0 +1,229 @@
+-- Coder: binoobpropro
+local green = Color3.fromRGB(0,255,0) -- open node
+local red = Color3.fromRGB(255, 0, 0) -- close node
+local blue = Color3.fromRGB(0,0,255)  -- path node
+local black = Color3.fromRGB(0,0,0)		  --block node
+
+local module = {}
+function module.new (npcR,visualize)
+	local t = setmetatable(module,{})
+	t.agentParameters = {
+		AgentSpeed = 0,
+		AgentHeight = 5,
+		AgentCanJump = true,
+		AgentJumpPower = 5, --stud
+		WaypointSpacing = 4 --reduce for better at parkour but consume more resource and path maybe jankier
+	}
+	t.rcParam = RaycastParams.new()
+	t.rcParam.RespectCanCollide = true
+	t.rcParam.FilterType = Enum.RaycastFilterType.Exclude
+	t.rcParam.FilterDescendantsInstances = {npcR}
+	t.rcParam.IgnoreWater = true
+	t.npc = npcR
+	t.tempFolder = nil
+	t.visualizePart = nil
+	if visualize then -- should only be use in testing 
+		t.tempFolder = Instance.new("Folder")
+		t.tempFolder.Name = "VisualizeParts"
+		t.tempFolder.Parent = workspace
+		t.visualizePart = Instance.new("Part")
+		t.visualizePart.Name = "Visualize Part"
+		t.visualizePart.Size = Vector3.new(t.agentParameters.WaypointSpacing,1,t.agentParameters.WaypointSpacing)
+		t.visualizePart.Transparency = .7
+		t.visualizePart.Material = Enum.Material.Plastic
+		t.visualizePart.Anchored = true
+		t.visualizePart.CanCollide = false
+		t.visualizePart.Color = green
+		t.visualizePart.Parent = game:GetService("ReplicatedStorage")
+	end
+	return t
+end
+module.__index = module
+
+local function findMin (open)
+	local temp = nil
+	for k,v in pairs(open) do
+		if temp then
+			if open[temp][3]>v[3] or (open[temp][3] == v[3] and open[temp][2] > v[2]) then
+				temp = k
+			end
+		else
+			temp = k
+		end
+	end
+	return temp
+end
+local function addNode (self,open,close,relation,visualiseT,startPosT,endPosT,current,direction)
+	local tempPos = current+direction
+	local agentParameters = self.agentParameters
+	-- check if blocked
+	local jumpAbleCheck = workspace:Raycast(current+Vector3.new(0,1,0),Vector3.new(direction.X,agentParameters.AgentJumpPower*2,direction.Z),self.rcParam)
+	local walkAbleCheck = workspace:Raycast(current+Vector3.new(0,1,0),direction,self.rcParam)
+	if not jumpAbleCheck or not walkAbleCheck then
+		--check for place to land
+		local depthCheck = workspace:Raycast(tempPos+Vector3.new(0,agentParameters.AgentJumpPower*2,0), -Vector3.new(0,agentParameters.AgentJumpPower*3,0),self.rcParam)
+		-- check if can jump or jumpable or climbable
+		if (depthCheck and agentParameters.AgentCanJump) or (depthCheck and not agentParameters.AgentCanJump and (depthCheck.Position.Y - current.Y)<1.5)then
+			local tempPosUR = depthCheck.Position + Vector3.new(0,1,0)
+			tempPos = Vector3.new(string.format("%0.1f", tempPosUR.X),string.format("%0.1f", tempPosUR.Y),string.format("%0.1f", tempPosUR.Z))	
+			local gCost = math.floor((tempPos-startPosT).Magnitude) -- distance from starting pos
+			local hCost = math.floor((endPosT - tempPos).Magnitude ) -- distance from end pos
+			local fCost = gCost + hCost
+			if open[tempPos] then
+				-- update cost
+				if open[tempPos][3]>fCost or (open[tempPos][3] == fCost and open[tempPos][2] > hCost) then
+					open[tempPos] = {gCost,hCost,fCost}
+					relation[tempPos] = current
+					if self.visualizePart then
+						local clone = self.visualizePart:Clone()
+						clone.Position = tempPos
+						clone.Parent = self.tempFolder
+						visualiseT[tempPos] = clone
+					end
+				end
+			elseif not table.find(close,tempPos) then
+				-- add 
+				open[tempPos] = {gCost,hCost,fCost}
+				relation[tempPos] = current
+				if self.visualizePart then
+					local clone = self.visualizePart:Clone()
+					clone.Parent = self.tempFolder
+					clone.Position = tempPos
+					visualiseT[tempPos] = clone
+				end
+			end
+		else
+			open[tempPos] = nil
+			table.insert(close,tempPos)
+			if self.visualizePart then
+				if not visualiseT[tempPos] then
+					local clone = self.visualizePart:Clone()
+					clone.Parent = self.tempFolder
+					clone.Position = tempPos
+					visualiseT[tempPos] = clone
+					visualiseT[tempPos].Color = black
+				else
+					visualiseT[tempPos].Color = black
+				end
+			end
+		end
+	else
+		open[tempPos] = nil
+		table.insert(close,tempPos)
+		if self.visualizePart then
+			if not visualiseT[tempPos] then
+				local clone = self.visualizePart:Clone()
+				clone.Parent = self.tempFolder
+				clone.Position = tempPos
+				visualiseT[tempPos] = clone
+				
+			else
+				visualiseT[tempPos].Color = black
+			end
+		end
+	end
+end
+function module:PathFinding (startPos,endPos)
+	local agentParamaters = self.agentParameters
+	local spacing = self.agentParameters.WaypointSpacing -- increase for more precisely part but more require more resource and vice versa
+	local visualiseT = {}
+	local open = {} -- distance from start to v , distance from v to end , sum
+	local close = {}
+	local relation = {startPos = nil}
+	-- transform position
+	local startPosUR = workspace:Raycast(startPos,Vector3.new(0,-agentParamaters.AgentHeight,0),self.rcParam).Position+Vector3.new(0,1,0)
+	local startPosT = Vector3.new(string.format("%0.1f", startPosUR.X),string.format("%0.1f", startPosUR.Y),string.format("%0.1f", startPosUR.Z))
+	local current = startPosT
+	local distancePos = endPos - startPosT
+	local x,z = distancePos.X,distancePos.Z
+	local xT,zT = math.round(x/spacing)*spacing,math.round(z/spacing)*spacing 
+	local endPosUR =  startPosT + Vector3.new(xT,endPos.Y,zT)+Vector3.new(0,1,0)
+	local endPosT =Vector3.new(string.format("%0.1f", endPosUR.X),string.format("%0.1f", endPosUR.Y),string.format("%0.1f", endPosUR.Z))
+	open[startPosT]= {0,math.round((endPosT - startPosT).Magnitude ),math.round((endPosT - startPos).Magnitude )}
+	if workspace:Raycast(endPosT,endPos,self.rcParam) then
+		print("Path not found")
+	else
+		local limit = 5000 --avoid crash
+		for i=1 , limit do
+			if (current - endPosT).Magnitude < agentParamaters.AgentHeight then
+				-- return path
+				local reversePath = {endPos, endPosT}
+				local parentPos = current
+				while true do
+					if parentPos == startPosT then
+						break
+					else
+						if self.visualizePart then
+							if visualiseT[parentPos] then
+								visualiseT[parentPos].Color = blue
+							end
+						end
+						parentPos = relation[parentPos]
+						table.insert(reversePath,parentPos)
+					end
+				end
+				local path = {}
+				for i,v in pairs(reversePath) do
+					path[#reversePath-(i-1)] = reversePath[i]
+				end
+				return path
+			else
+				--find path
+				local min = findMin(open)
+				if min then
+					current = min
+				else
+					print("Path not found")
+					break
+				end
+				--get neighbour (reachable) node to the current node allowing it to skip node with jumping but if cant jump only run 1 time
+				for i=1,math.round((agentParamaters.AgentJumpPower*(4/5))/agentParamaters.WaypointSpacing) do
+					local spacingT =spacing*i
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(spacingT,0,0))
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(-spacingT,0,0))
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(0,0,spacingT))
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(0,0,-spacingT))
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(spacingT,0,spacingT))-- Remove 
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(-spacingT,0,-spacingT))-- these if you want npc to not to move diagonal
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(spacingT,0,-spacingT))-- this can help npc to avoid getting stuck in someway
+					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(-spacingT,0,spacingT))--  but will make the path longer
+					if not agentParamaters.AgentCanJump then
+						break
+					end
+				end
+				open[current] = nil
+				table.insert(close,current)
+				if self.visualizePart then
+					if visualiseT[current] then
+						visualiseT[current].Color = red
+					end
+				end
+			end
+			task.wait(.0001) --should remove
+		end
+	end
+end
+function module:FollowPathTo (endPosR)
+	local previousPos = nil
+	local humanoid = self.npc:FindFirstChild("Humanoid")
+	local animator:Animator = humanoid:FindFirstChild("Animator")
+	local animate = self.npc.Animate
+	local runTrack = animator:LoadAnimation(animate.run.RunAnim)
+	local jumpTrack = animator:LoadAnimation(animate.jump.JumpAnim)
+	local path = module:PathFinding(self.npc.HumanoidRootPart.Position,endPosR)
+	if path then
+		runTrack:Play()
+		for i,v in pairs(path) do
+			if self.agentParameters.AgentCanJump and previousPos and previousPos.Y < v.Y then
+				task.wait(.2)
+				jumpTrack:Play()
+				humanoid.Jump = true
+			end
+			humanoid:MoveTo(v)
+			humanoid.MoveToFinished:Wait()
+			previousPos = v
+		end
+		runTrack:Stop()
+	end
+end
+return module
