@@ -12,7 +12,7 @@ function module.new (npcR,visualize)
 		AgentHeight = 5,
 		AgentCanJump = true,
 		AgentJumpPower = 5, --stud
-		WaypointSpacing = 4 --reduce for better at parkour but consume more resource and path maybe jankier
+		WaypointSpacing = 1 --reduce for better at parkour but consume more resource and path maybe jankier
 	}
 	t.rcParam = RaycastParams.new()
 	t.rcParam.RespectCanCollide = true
@@ -21,6 +21,7 @@ function module.new (npcR,visualize)
 	t.rcParam.IgnoreWater = true
 	t.npc = npcR
 	t.tempFolder = nil
+	t.visualizeT = {}
 	t.visualizePart = nil
 	if visualize then -- should only be use in testing 
 		t.tempFolder = Instance.new("Folder")
@@ -39,7 +40,21 @@ function module.new (npcR,visualize)
 	return t
 end
 module.__index = module
+local function createVisualizePart (self,posR,colorR)
+	if self.visualizePart then
+		local visualizeT = self.visualizeT
+		if not visualizeT[posR] then
+			local clone = self.visualizePart:Clone()
+			clone.Parent = self.tempFolder
+			clone.Position = posR
+			visualizeT[posR] = clone
 
+		else
+			visualizeT[posR].Color = colorR
+		end
+	end
+end
+--find the position with the lowest cost
 local function findMin (open)
 	local temp = nil
 	for k,v in pairs(open) do
@@ -53,12 +68,12 @@ local function findMin (open)
 	end
 	return temp
 end
-local function addNode (self,open,close,relation,visualiseT,startPosT,endPosT,current,direction)
+local function addNode (self,open,close,relation,startPosT,endPosT,current,direction)
 	local tempPos = current+direction
 	local agentParameters = self.agentParameters
 	-- check if blocked
 	local jumpAbleCheck = workspace:Raycast(current+Vector3.new(0,1,0),Vector3.new(direction.X,agentParameters.AgentJumpPower*2,direction.Z),self.rcParam)
-	local walkAbleCheck = workspace:Raycast(current+Vector3.new(0,1,0),direction,self.rcParam)
+	local walkAbleCheck = workspace:Raycast(current+Vector3.new(0,1.5,0),direction,self.rcParam)
 	if not jumpAbleCheck or not walkAbleCheck then
 		--check for place to land
 		local depthCheck = workspace:Raycast(tempPos+Vector3.new(0,agentParameters.AgentJumpPower*2,0), -Vector3.new(0,agentParameters.AgentJumpPower*3,0),self.rcParam)
@@ -74,59 +89,28 @@ local function addNode (self,open,close,relation,visualiseT,startPosT,endPosT,cu
 				if open[tempPos][3]>fCost or (open[tempPos][3] == fCost and open[tempPos][2] > hCost) then
 					open[tempPos] = {gCost,hCost,fCost}
 					relation[tempPos] = current
-					if self.visualizePart then
-						local clone = self.visualizePart:Clone()
-						clone.Position = tempPos
-						clone.Parent = self.tempFolder
-						visualiseT[tempPos] = clone
-					end
+					createVisualizePart(self,tempPos,green)
 				end
 			elseif not table.find(close,tempPos) then
 				-- add 
 				open[tempPos] = {gCost,hCost,fCost}
 				relation[tempPos] = current
-				if self.visualizePart then
-					local clone = self.visualizePart:Clone()
-					clone.Parent = self.tempFolder
-					clone.Position = tempPos
-					visualiseT[tempPos] = clone
-				end
+				createVisualizePart(self,tempPos,green)
 			end
 		else
 			open[tempPos] = nil
 			table.insert(close,tempPos)
-			if self.visualizePart then
-				if not visualiseT[tempPos] then
-					local clone = self.visualizePart:Clone()
-					clone.Parent = self.tempFolder
-					clone.Position = tempPos
-					visualiseT[tempPos] = clone
-					visualiseT[tempPos].Color = black
-				else
-					visualiseT[tempPos].Color = black
-				end
-			end
+			createVisualizePart(self,tempPos,black)
 		end
 	else
 		open[tempPos] = nil
 		table.insert(close,tempPos)
-		if self.visualizePart then
-			if not visualiseT[tempPos] then
-				local clone = self.visualizePart:Clone()
-				clone.Parent = self.tempFolder
-				clone.Position = tempPos
-				visualiseT[tempPos] = clone
-				
-			else
-				visualiseT[tempPos].Color = black
-			end
-		end
+		createVisualizePart(self,tempPos,black)
 	end
 end
 function module:PathFinding (startPos,endPos)
 	local agentParamaters = self.agentParameters
 	local spacing = self.agentParameters.WaypointSpacing -- increase for more precisely part but more require more resource and vice versa
-	local visualiseT = {}
 	local open = {} -- distance from start to v , distance from v to end , sum
 	local close = {}
 	local relation = {startPos = nil}
@@ -153,11 +137,7 @@ function module:PathFinding (startPos,endPos)
 					if parentPos == startPosT then
 						break
 					else
-						if self.visualizePart then
-							if visualiseT[parentPos] then
-								visualiseT[parentPos].Color = blue
-							end
-						end
+						createVisualizePart(self,parentPos,blue)
 						parentPos = relation[parentPos]
 						table.insert(reversePath,parentPos)
 					end
@@ -165,6 +145,11 @@ function module:PathFinding (startPos,endPos)
 				local path = {}
 				for i,v in pairs(reversePath) do
 					path[#reversePath-(i-1)] = reversePath[i]
+				end
+				for i,v in pairs(self.tempFolder:GetChildren()) do
+					if v.Color ~= blue then
+						v:Destroy()
+					end
 				end
 				return path
 			else
@@ -179,30 +164,27 @@ function module:PathFinding (startPos,endPos)
 				--get neighbour (reachable) node to the current node allowing it to skip node with jumping but if cant jump only run 1 time
 				for i=1,math.round((agentParamaters.AgentJumpPower*(4/5))/agentParamaters.WaypointSpacing) do
 					local spacingT =spacing*i
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(spacingT,0,0))
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(-spacingT,0,0))
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(0,0,spacingT))
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(0,0,-spacingT))
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(spacingT,0,spacingT))-- Remove 
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(-spacingT,0,-spacingT))-- these if you want npc to not to move diagonal
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(spacingT,0,-spacingT))-- this can help npc to avoid getting stuck in someway
-					addNode(self,open,close,relation,visualiseT,startPosT,endPosT,current,Vector3.new(-spacingT,0,spacingT))--  but will make the path longer
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(spacingT,0,0))
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(-spacingT,0,0))
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(0,0,spacingT))
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(0,0,-spacingT))
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(spacingT,0,spacingT))-- Remove 
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(-spacingT,0,-spacingT))-- these if you want npc to not to move diagonal
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(spacingT,0,-spacingT))-- this can help npc to avoid getting stuck in someway
+					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(-spacingT,0,spacingT))--  but will make the path longer
 					if not agentParamaters.AgentCanJump then
 						break
 					end
 				end
 				open[current] = nil
 				table.insert(close,current)
-				if self.visualizePart then
-					if visualiseT[current] then
-						visualiseT[current].Color = red
-					end
-				end
+				createVisualizePart(self,current,red)
 			end
 			task.wait(.0001) --should remove
 		end
 	end
 end
+--create path then follow
 function module:FollowPathTo (endPosR)
 	local previousPos = nil
 	local humanoid = self.npc:FindFirstChild("Humanoid")
