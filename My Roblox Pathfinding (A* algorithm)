@@ -68,6 +68,17 @@ local function findMin (open)
 	end
 	return temp
 end
+local function getHCost (temPos,endPosT,spacing)
+	local distance = endPosT - temPos
+	local x = math.abs(distance.X)
+	local y = math.abs(distance.Y)
+	local z = math.abs(distance.Z)
+	if x>z then
+		return z*math.pow(2,1/2) + math.abs(x-z) +y*math.pow(2,1/2)
+	else
+		return x*math.pow(2,1/2) + math.abs(z-x) +y*math.pow(2,1/2)
+	end
+end
 local function addNode (self,open,close,relation,startPosT,endPosT,current,direction)
 	local tempPos = current+direction
 	local agentParameters = self.agentParameters
@@ -81,8 +92,8 @@ local function addNode (self,open,close,relation,startPosT,endPosT,current,direc
 		if (depthCheck and agentParameters.AgentCanJump) or (depthCheck and not agentParameters.AgentCanJump and (depthCheck.Position.Y - current.Y)<1.5)then
 			local tempPosUR = depthCheck.Position + Vector3.new(0,1,0)
 			tempPos = Vector3.new(string.format("%0.1f", tempPosUR.X),string.format("%0.1f", tempPosUR.Y),string.format("%0.1f", tempPosUR.Z))	
-			local gCost = math.floor((tempPos-startPosT).Magnitude) -- distance from starting pos
-			local hCost = math.floor((endPosT - tempPos).Magnitude ) -- distance from end pos
+			local gCost = math.floor(open[current][1]+direction.Magnitude) -- distance from starting pos
+			local hCost = math.floor(getHCost(tempPos,endPosT,agentParameters.WaypointSpacing)) -- distance from end pos
 			local fCost = gCost + hCost
 			if open[tempPos] then
 				-- update cost
@@ -109,28 +120,32 @@ local function addNode (self,open,close,relation,startPosT,endPosT,current,direc
 	end
 end
 function module:PathFinding (startPos,endPos)
-	local agentParamaters = self.agentParameters
+	local agentParameters = self.agentParameters
 	local spacing = self.agentParameters.WaypointSpacing -- increase for more precisely part but more require more resource and vice versa
+	-- transform position
+	local startPosUR = workspace:Raycast(startPos,Vector3.new(0,-agentParameters.AgentHeight,0),self.rcParam).Position+Vector3.new(0,1,0)
+	local startPosT = Vector3.new(string.format("%0.1f", startPosUR.X),string.format("%0.1f", startPosUR.Y),string.format("%0.1f", startPosUR.Z))
 	local open = {} -- distance from start to v , distance from v to end , sum
 	local close = {}
-	local relation = {startPos = nil}
-	-- transform position
-	local startPosUR = workspace:Raycast(startPos,Vector3.new(0,-agentParamaters.AgentHeight,0),self.rcParam).Position+Vector3.new(0,1,0)
-	local startPosT = Vector3.new(string.format("%0.1f", startPosUR.X),string.format("%0.1f", startPosUR.Y),string.format("%0.1f", startPosUR.Z))
+	local relation = {startPosT = nil}
 	local current = startPosT
 	local distancePos = endPos - startPosT
 	local x,z = distancePos.X,distancePos.Z
 	local xT,zT = math.round(x/spacing)*spacing,math.round(z/spacing)*spacing 
 	local endPosUR =  startPosT + Vector3.new(xT,endPos.Y,zT)+Vector3.new(0,1,0)
 	local endPosT =Vector3.new(string.format("%0.1f", endPosUR.X),string.format("%0.1f", endPosUR.Y),string.format("%0.1f", endPosUR.Z))
-	open[startPosT]= {0,math.round((endPosT - startPosT).Magnitude ),math.round((endPosT - startPos).Magnitude )}
-	if workspace:Raycast(endPosT,endPos,self.rcParam) then
+	--startCost
+	local gCost = 0 -- distance from starting pos
+	local hCost = math.floor(getHCost(startPosT,endPosT,agentParameters.WaypointSpacing)) -- distance from end pos
+	local fCost = gCost + hCost
+	open[startPosT]= {0,hCost,fCost}
+	if workspace:Raycast(endPosT,endPos-endPosT+Vector3.new(0,1,0),self.rcParam) then
 		print("Path not found")
 	else
 		local limit = 5000 --avoid crash
 		for i=1 , limit do
-			if (current - endPosT).Magnitude < agentParamaters.AgentHeight then
-				-- return path
+			if (current - endPosT).Magnitude < agentParameters.AgentHeight then
+				-- return path when found
 				local reversePath = {endPos, endPosT}
 				local parentPos = current
 				while true do
@@ -153,7 +168,7 @@ function module:PathFinding (startPos,endPos)
 				end
 				return path
 			else
-				--find path
+				--find path to walk on
 				local min = findMin(open)
 				if min then
 					current = min
@@ -162,7 +177,7 @@ function module:PathFinding (startPos,endPos)
 					break
 				end
 				--get neighbour (reachable) node to the current node allowing it to skip node with jumping but if cant jump only run 1 time
-				for i=1,math.round((agentParamaters.AgentJumpPower*(4/5))/agentParamaters.WaypointSpacing) do
+				for i=1,math.round((agentParameters.AgentJumpPower*(4/5))/agentParameters.WaypointSpacing) do
 					local spacingT =spacing*i
 					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(spacingT,0,0))
 					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(-spacingT,0,0))
@@ -172,7 +187,7 @@ function module:PathFinding (startPos,endPos)
 					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(-spacingT,0,-spacingT))-- these if you want npc to not to move diagonal
 					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(spacingT,0,-spacingT))-- this can help npc to avoid getting stuck in someway
 					addNode(self,open,close,relation,startPosT,endPosT,current,Vector3.new(-spacingT,0,spacingT))--  but will make the path longer
-					if not agentParamaters.AgentCanJump then
+					if not agentParameters.AgentCanJump then
 						break
 					end
 				end
@@ -182,9 +197,12 @@ function module:PathFinding (startPos,endPos)
 			end
 			task.wait(.0001) --should remove
 		end
+		for i,v in pairs(self.tempFolder:GetChildren()) do
+			v:Destroy()
+		end
 	end
 end
---create path then follow
+--create path then follow it i recommend you to use it because it include jumping
 function module:FollowPathTo (endPosR)
 	local previousPos = nil
 	local humanoid = self.npc:FindFirstChild("Humanoid")
